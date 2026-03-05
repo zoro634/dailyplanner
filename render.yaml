@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: cat-tracker-api
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.16.1
+      - key: PORT
+        value: 10000
