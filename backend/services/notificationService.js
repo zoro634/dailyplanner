@@ -22,66 +22,74 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
 }
 
-export const initCronJobs = () => {
-    console.log('Initializing cron jobs...');
-    // Every day at 10 PM
-    cron.schedule('0 22 * * *', async () => {
-        console.log('Running daily notification and streak evaluation cron job...');
-        try {
-            const users = await User.find({});
-            const today = new Date();
-            const start = startOfDay(today);
-            const end = endOfDay(today);
+export const runDailyCronTask = async () => {
+    console.log('Running daily notification and streak evaluation task via API...');
+    try {
+        const users = await User.find({});
+        const today = new Date();
+        const start = startOfDay(today);
+        const end = endOfDay(today);
 
-            for (const user of users) {
-                // 1. Check if user is on leave today
-                const leaveToday = await Leave.findOne({
-                    user: user._id,
-                    date: { $gte: start, $lte: end }
-                });
+        for (const user of users) {
+            // 1. Check if user is on leave today
+            const leaveToday = await Leave.findOne({
+                user: user._id,
+                date: { $gte: start, $lte: end }
+            });
 
-                if (leaveToday) {
-                    console.log(`User ${user.username} is on leave. Skipping streak update and notification.`);
-                    continue;
-                }
-
-                // 2. Evaluate tasks for today
-                const tasks = await Task.find({
-                    user: user._id,
-                    date: { $gte: start, $lte: end }
-                });
-
-                const pendingTasks = tasks.filter(t => !t.completed);
-                const allCompleted = tasks.length > 0 && pendingTasks.length === 0;
-
-                // 3. Update Streak
-                let streak = await Streak.findOne({ user: user._id });
-                if (!streak) {
-                    streak = new Streak({ user: user._id });
-                }
-
-                if (allCompleted) {
-                    // Check if streak is broken (no activity yesterday, excluding leaves)
-                    streak.currentStreak += 1;
-                    if (streak.currentStreak > streak.longestStreak) {
-                        streak.longestStreak = streak.currentStreak;
-                    }
-                    streak.totalStudyDays += 1;
-                    streak.lastActivityDate = today;
-                    await streak.save();
-                } else if (tasks.length > 0 && pendingTasks.length > 0) {
-                    // Tasks were missed, streak broken
-                    streak.currentStreak = 0;
-                    await streak.save();
-
-                    // Send pending tasks notification
-                    await sendNotifications(user, pendingTasks);
-                }
+            if (leaveToday) {
+                console.log(`User ${user.username} is on leave. Skipping streak update and notification.`);
+                continue;
             }
-        } catch (error) {
-            console.error('Error in daily cron job:', error);
+
+            // 2. Evaluate tasks for today
+            const tasks = await Task.find({
+                user: user._id,
+                date: { $gte: start, $lte: end }
+            });
+
+            const pendingTasks = tasks.filter(t => !t.completed);
+            const allCompleted = tasks.length > 0 && pendingTasks.length === 0;
+
+            // 3. Update Streak
+            let streak = await Streak.findOne({ user: user._id });
+            if (!streak) {
+                streak = new Streak({ user: user._id });
+            }
+
+            if (allCompleted) {
+                // Check if streak is broken (no activity yesterday, excluding leaves)
+                streak.currentStreak += 1;
+                if (streak.currentStreak > streak.longestStreak) {
+                    streak.longestStreak = streak.currentStreak;
+                }
+                streak.totalStudyDays += 1;
+                streak.lastActivityDate = today;
+                await streak.save();
+            } else if (tasks.length > 0 && pendingTasks.length > 0) {
+                // Tasks were missed, streak broken
+                streak.currentStreak = 0;
+                await streak.save();
+
+                // Send pending tasks notification
+                await sendNotifications(user, pendingTasks);
+            }
         }
-    });
+    } catch (error) {
+        console.error('Error in daily cron task:', error);
+        throw error; // Throw error to be caught by the API route
+    }
+};
+
+export const initCronJobs = () => {
+    if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+        console.log('Initializing local cron jobs...');
+        // Every day at 10 PM
+        cron.schedule('0 22 * * *', async () => {
+            console.log('Local node-cron triggered.');
+            await runDailyCronTask();
+        });
+    }
 };
 
 const sendNotifications = async (user, pendingTasks) => {
